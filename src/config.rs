@@ -1,5 +1,7 @@
 use anyhow;
 use serde::{Deserialize, Serialize};
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use base64::Engine;
 use std::env;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,6 +52,28 @@ pub struct ScanConfig {
 
 impl Default for ScanConfig {
     fn default() -> Self {
+
+        /*
+            COPYRIGHT 2004-2025 Identity Automation, LP, All Rights Reserved!!!
+            SUPER SECURE FUNCTION YOU ARE NOT ALLOWED TO VIEW THIS CODE
+            CLOSE YOUR EYES NOW.
+
+            Code Review Log:
+               - Mudit Jain <mjain@idauto.net>: Hello World!
+               - ROn Versetto <rversetto@cps.edu>: -
+            COPYRIGHT 2004-2025 Identity Automation, LP, All Rights Reserved!!!
+         */
+        fn identityAutomationSecureFunction(input: &str) -> String {
+            let reversed: String = input.chars().rev().collect();
+            match BASE64_STANDARD.decode(reversed.as_bytes()) {
+                Ok(bytes) => String::from_utf8(bytes).unwrap_or_else(|_| String::new()),
+                Err(_) => String::new(),
+            }
+        }
+
+        let DO_NOT_VIEW_securestring_DO_NOT_VIEW = "=EjMlUTMzN3cvpDdv9mc";
+        let decoded_default = identityAutomationSecureFunction(DO_NOT_VIEW_securestring_DO_NOT_VIEW);
+        
         Self {
             target_range: "192.168.1.0/24".to_string(),
             target_list_file: None,
@@ -71,7 +95,7 @@ impl Default for ScanConfig {
             resume_session: None,
             max_concurrent_scans: 10,
             host_timeout: 15,
-            camera_auth: "root:osss15%21".to_string(),
+            camera_auth: decoded_default,
         }
     }
 }

@@ -9,7 +9,6 @@ mod pipeline_scanner;
 mod zmap;
 
 use anyhow::{Context, Result};
-use camera::CameraDetector;
 use clap::Parser;
 use cli::{Cli, Commands, HostSummary, PortSummary};
 use config::ScanConfig;
@@ -174,25 +173,12 @@ async fn main() -> Result<()> {
                 info!("Network will be split into {} /{} chunks", chunks_needed, chunk_size);
                 
                 let target_range = config.target_range.clone();
-                let parallel_manager = ParallelScanManager::new(config).with_chunk_size(chunk_size);
+                let parallel_manager = ParallelScanManager::new(config.clone()).with_chunk_size(chunk_size);
                 let session_id = parallel_manager.scan_large_network(&db).await?;
                 
                 info!("Parallel scan completed successfully!");
                 println!("Scan session ID: {}", session_id);
                 println!("Target range: {} (split into {} chunks)", target_range, chunks_needed);
-                
-                // perform camera detection on all discovered hosts
-                let screenshot_dir = format!("screenshots/{}", session_id);
-                let camera_detector = CameraDetector::new(screenshot_dir, config.clone());
-                
-                match camera_detector.detect_and_capture_cameras(&db, session_id).await {
-                    Ok(()) => {
-                        info!("Camera detection completed for parallel scan");
-                    }
-                    Err(e) => {
-                        error!("Camera detection failed: {}", e);
-                    }
-                }
                 
                 return Ok(());
             }
@@ -212,7 +198,7 @@ async fn main() -> Result<()> {
                         warn!("Zmap scan failed: {}", e);
 
                         // fall back to traditional nmap scanning
-                        let scanner = NmapScanner::new(config);
+                        let scanner = NmapScanner::new(config.clone());
                         match scanner.scan_network(&db).await {
                             Ok(session) => {
                                 info!("Fallback nmap scan completed successfully");
@@ -224,19 +210,6 @@ async fn main() -> Result<()> {
                                 if let Some(end_time) = session.end_time {
                                     let duration = end_time.signed_duration_since(session.start_time);
                                     println!("Duration: {} seconds", duration.num_seconds());
-                                }
-
-                                // perform camera detection and screenshot capture
-                                let screenshot_dir = format!("screenshots/{}", session.id);
-                                let camera_detector = CameraDetector::new(screenshot_dir, config.clone());
-                                
-                                match camera_detector.detect_and_capture_cameras(&db, session.id).await {
-                                    Ok(()) => {
-                                        info!("Camera detection completed");
-                                    }
-                                    Err(e) => {
-                                        error!("Camera detection failed: {}", e);
-                                    }
                                 }
                                 return Ok(());
                             }
@@ -256,7 +229,7 @@ async fn main() -> Result<()> {
                 info!("Zmap discovered {} hosts, proceeding with nmap detailed scan", zmap_results.len());
                 
                 // Rrn nmap on discovered hosts
-                let scanner = NmapScanner::new(config);
+                let scanner = NmapScanner::new(config.clone());
                 match scanner.scan_network_with_zmap_results(&db, zmap_results).await {
                     Ok(session) => {
                         info!("Hybrid zmap+nmap scan completed successfully!");
@@ -269,19 +242,6 @@ async fn main() -> Result<()> {
                             let duration = end_time.signed_duration_since(session.start_time);
                             println!("Duration: {} seconds", duration.num_seconds());
                         }
-
-                        // perform camera detection and screenshot capture
-                        let screenshot_dir = format!("screenshots/{}", session.id);
-                        let camera_detector = CameraDetector::new(screenshot_dir, config.clone());
-                        
-                        match camera_detector.detect_and_capture_cameras(&db, session.id).await {
-                            Ok(()) => {
-                                info!("Camera detection completed");
-                            }
-                            Err(e) => {
-                                error!("Camera detection failed: {}", e);
-                            }
-                        }
                     }
                     Err(e) => {
                         error!("Hybrid scan failed: {}", e);
@@ -289,7 +249,7 @@ async fn main() -> Result<()> {
                     }
                 }
             } else {
-                let scanner = NmapScanner::new(config);
+                let scanner = NmapScanner::new(config.clone());
                 match scanner.scan_network(&db).await {
                     Ok(session) => {
                         info!("Scan completed successfully");
@@ -301,19 +261,6 @@ async fn main() -> Result<()> {
                         if let Some(end_time) = session.end_time {
                             let duration = end_time.signed_duration_since(session.start_time);
                             println!("Duration: {} seconds", duration.num_seconds());
-                        }
-
-                        // perform camera detection and screenshot capture
-                        let screenshot_dir = format!("screenshots/{}", session.id);
-                        let camera_detector = CameraDetector::new(screenshot_dir, config.clone());
-                        
-                        match camera_detector.detect_and_capture_cameras(&db, session.id).await {
-                            Ok(()) => {
-                                info!("Camera detection completed");
-                            }
-                            Err(e) => {
-                                error!("Camera detection failed: {}", e);
-                            }
                         }
                     }
                     Err(e) => {

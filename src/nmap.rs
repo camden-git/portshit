@@ -1177,31 +1177,17 @@ impl NmapScanner {
             .and_then(|hostnames| hostnames.hostnames.first())
             .map(|hostname| hostname.name.clone());
 
-        let (os_family, os_gen, os_type) = if let Some(os) = &nmap_host.os {
-            if let Some(os_matches) = &os.os_matches {
-                if let Some(os_match) = os_matches.first() {
-                    if let Some(os_classes) = &os_match.os_classes {
-                        if let Some(os_class) = os_classes.first() {
-                            (
-                                Some(os_class.os_family.clone()),
-                                Some(os_class.os_gen.clone()),
-                                Some(os_class.os_type.clone()),
-                            )
-                        } else {
-                            (None, None, None)
-                        }
-                    } else {
-                        (None, None, None)
-                    }
-                } else {
-                    (None, None, None)
-                }
-            } else {
-                (None, None, None)
-            }
-        } else {
-            (None, None, None)
-        };
+        let (os_family, os_gen, os_type) = nmap_host.os
+            .as_ref()
+            .and_then(|os| os.os_matches.as_ref()?.first())
+            .and_then(|os_match| os_match.os_classes.as_ref()?.first())
+            .map(|os_class| (
+                Some(os_class.os_family.clone()),
+                Some(os_class.os_gen.clone()),
+                Some(os_class.os_type.clone()),
+            ))
+            .unwrap_or((None, None, None));
+
 
         let (uptime, last_boot) = if let Some(uptime) = &nmap_host.uptime {
             let last_boot = uptime.last_boot.as_ref()

@@ -381,8 +381,22 @@ impl PipelineScanner {
         let nmap_scanner = NmapScanner::new(chunk_config);
         let hosts_found = nmap_scanner.scan_network_with_session(db, session_id).await?;
         
-        // get the hosts that were discovered
-        let hosts = db.get_hosts_by_session(&session_id).await?;
+        // get the hosts that were discovered and restrict to this chunk's IP range
+        let all_hosts = db.get_hosts_by_session(&session_id).await?;
+        let hosts: Vec<Host> = all_hosts
+            .into_iter()
+            .filter(|h| {
+                if let (std::net::IpAddr::V4(start), std::net::IpAddr::V4(end)) = (chunk.start_ip, chunk.end_ip) {
+                    if let Ok(ipv4) = h.ip_address.parse::<std::net::Ipv4Addr>() {
+                        let ip = u32::from(ipv4);
+                        let start_u32 = u32::from(start);
+                        let end_u32 = u32::from(end);
+                        return ip >= start_u32 && ip <= end_u32;
+                    }
+                }
+                false
+            })
+            .collect();
         
         // update progress as completed
         if !config.turbo_mode {
@@ -432,8 +446,8 @@ impl PipelineScanner {
             }
         }
         
-        // get updated hosts with service information
-        let updated_hosts = db.get_hosts_by_session(&session_id).await?;
+        // pass through the same hosts for downstream processing (service info is stored in DB)
+        let updated_hosts: Vec<Host> = hosts.to_vec();
         
         // update progress as completed
         db.update_scan_progress_status(&progress_id, "completed", None).await?;
@@ -488,18 +502,18 @@ impl PipelineScanner {
             return Ok(0);
         }
         
-        // capture screenshots from each RTSP host
+        // capture screenshots from each RTSP host, skipping already captured hosts
         let mut screenshots_captured = 0;
+        use std::collections::HashSet;
+        let mut seen: HashSet<String> = HashSet::new();
         for host_ip in rtsp_hosts {
-            // check if we've already captured a screenshot for this host in this session
-            let existing_screenshots = db.get_camera_screenshots_by_session(&session_id).await?;
-            let already_captured = existing_screenshots.iter().any(|s| s.host_ip == host_ip);
-            
-            if already_captured {
-                debug!("Skipping {} - screenshot already captured", host_ip);
+            if !seen.insert(host_ip.clone()) {
                 continue;
             }
-            
+            if db.has_camera_screenshot_for_host(&session_id, &host_ip).await.unwrap_or(false) {
+                debug!("[CAMERA] Skipping {} - screenshot already exists for session", host_ip);
+                continue;
+            }
             match camera_detector.capture_camera_screenshot(&host_ip).await {
                 Ok(screenshot_path) => {
                     screenshots_captured += 1;

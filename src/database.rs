@@ -197,7 +197,8 @@ impl Database {
                 screenshot_path TEXT NOT NULL,
                 captured_at TEXT NOT NULL,
                 error_message TEXT,
-                FOREIGN KEY (scan_session_id) REFERENCES scan_sessions (id)
+                FOREIGN KEY (scan_session_id) REFERENCES scan_sessions (id),
+                UNIQUE(scan_session_id, host_ip)
             )
             "#,
         )
@@ -353,7 +354,7 @@ impl Database {
     pub async fn insert_camera_screenshot(&self, screenshot: &CameraScreenshot) -> Result<(), sqlx::Error> {
         sqlx::query(
             r#"
-            INSERT INTO camera_screenshots (id, scan_session_id, host_ip, rtsp_url, screenshot_path, captured_at, error_message)
+            INSERT OR IGNORE INTO camera_screenshots (id, scan_session_id, host_ip, rtsp_url, screenshot_path, captured_at, error_message)
             VALUES (?, ?, ?, ?, ?, ?, ?)
             "#,
         )
@@ -393,6 +394,22 @@ impl Database {
         }
 
         Ok(screenshots)
+    }
+
+    pub async fn has_camera_screenshot_for_host(
+        &self,
+        session_id: &Uuid,
+        host_ip: &str,
+    ) -> Result<bool, sqlx::Error> {
+        let row = sqlx::query(
+            "SELECT 1 FROM camera_screenshots WHERE scan_session_id = ? AND host_ip = ? LIMIT 1",
+        )
+        .bind(session_id.to_string())
+        .bind(host_ip)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.is_some())
     }
 
     pub async fn get_scan_sessions(&self) -> Result<Vec<ScanSession>, sqlx::Error> {

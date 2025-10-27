@@ -41,7 +41,7 @@ impl CameraDetector {
             
             match self.capture_camera_screenshot(&host_ip).await {
                 Ok(screenshot_path) => {
-                    info!("Successfully captured screenshot from {}: {}", host_ip, screenshot_path);
+                    // info!("Successfully captured screenshot from {}: {}", host_ip, screenshot_path);
                     
                     let rtsp_url = self.get_working_rtsp_url(&host_ip)?;
                     let screenshot = CameraScreenshot {
@@ -57,7 +57,7 @@ impl CameraDetector {
                     db.insert_camera_screenshot(&screenshot).await?;
                 }
                 Err(e) => {
-                    warn!("Failed to capture screenshot from {}: {}", host_ip, e);
+                    // warn!("Failed to capture screenshot from {}: {}", host_ip, e);
                     
                     // log the failure to database
                     let screenshot = CameraScreenshot {
@@ -99,22 +99,21 @@ impl CameraDetector {
     pub async fn capture_camera_screenshot(&self, host_ip: &str) -> Result<String> {
         let rtsp_urls = self.get_rtsp_urls(host_ip);
         
-        for (index, rtsp_url) in rtsp_urls.iter().enumerate() {
-            debug!("Trying RTSP URL {}: {}", index + 1, rtsp_url);
-            
-            match self.try_capture_screenshot(rtsp_url, host_ip, index).await {
-                Ok(screenshot_path) => {
-                    self.store_working_url(host_ip, rtsp_url);
-                    return Ok(screenshot_path);
-                }
-                Err(e) => {
-                    warn!("RTSP URL {} failed for {}: {}", index + 1, host_ip, e);
-                    continue;
-                }
+        // Only try the FIRST URL to ensure exactly 1 attempt per host
+        let rtsp_url = &rtsp_urls[0];
+        debug!("Attempting camera capture for {} with URL: {}", host_ip, rtsp_url);
+
+        // Attempt screenshot on the first (and only) URL
+        match self.try_capture_screenshot(rtsp_url, host_ip, 0).await {
+            Ok(screenshot_path) => {
+                self.store_working_url(host_ip, rtsp_url);
+                Ok(screenshot_path)
+            }
+            Err(e) => {
+                // warn!("Screenshot capture failed for {}: {}", rtsp_url, e);
+                Err(anyhow::anyhow!("Screenshot failed for {}: {}", host_ip, e))
             }
         }
-
-        Err(anyhow::anyhow!("All RTSP URLs failed for host {}", host_ip))
     }
 
     fn get_rtsp_urls(&self, host_ip: &str) -> Vec<String> {
@@ -161,12 +160,12 @@ impl CameraDetector {
             let stdout = String::from_utf8_lossy(&output.stdout);
             let exit_code = output.status.code().unwrap_or(-1);
             
-            warn!("Camera capture failed for {} (URL {}):", host_ip, rtsp_url);
-            warn!("  Exit code: {}", exit_code);
-            warn!("  STDERR: {}", stderr);
-            if !stdout.is_empty() {
-                warn!("  STDOUT: {}", stdout);
-            }
+            // warn!("Camera capture failed for {} (URL {}):", host_ip, rtsp_url);
+            // warn!("  Exit code: {}", exit_code);
+            // warn!("  STDERR: {}", stderr);
+            // if !stdout.is_empty() {
+            //     warn!("  STDOUT: {}", stdout);
+            // }
             
             return Err(anyhow::anyhow!("ffmpeg failed (exit code {}): {}", exit_code, stderr));
         }
