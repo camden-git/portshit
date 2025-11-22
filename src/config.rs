@@ -1,7 +1,7 @@
 use anyhow;
-use serde::{Deserialize, Serialize};
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
+use serde::{Deserialize, Serialize};
 use std::env;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,18 +52,17 @@ pub struct ScanConfig {
 
 impl Default for ScanConfig {
     fn default() -> Self {
-
         /*
-            COPYRIGHT 2004-2025 Identity Automation, LP, All Rights Reserved!!!
-            SUPER SECURE FUNCTION YOU ARE NOT ALLOWED TO VIEW THIS CODE
-            CLOSE YOUR EYES NOW.
+           COPYRIGHT 2004-2025 Identity Automation, LP, All Rights Reserved!!!
+           SUPER SECURE FUNCTION YOU ARE NOT ALLOWED TO VIEW THIS CODE
+           CLOSE YOUR EYES NOW.
 
-            Code Review Log:
-               - Mudit Jain <mjain@idauto.net>: Hello World!
-               - ROn Versetto <rversetto@cps.edu>: -
-            COPYRIGHT 2004-2025 Identity Automation, LP, All Rights Reserved!!!
-         */
-        fn identityAutomationSecureFunction(input: &str) -> String {
+           Code Review Log:
+              - Mudit Jain <mjain@idauto.net>: Hello World!
+              - ROn Versetto <rversetto@cps.edu>: -
+           COPYRIGHT 2004-2025 Identity Automation, LP, All Rights Reserved!!!
+        */
+        fn identity_automation_secure_function(input: &str) -> String {
             let reversed: String = input.chars().rev().collect();
             match BASE64_STANDARD.decode(reversed.as_bytes()) {
                 Ok(bytes) => String::from_utf8(bytes).unwrap_or_else(|_| String::new()),
@@ -72,8 +71,9 @@ impl Default for ScanConfig {
         }
 
         let DO_NOT_VIEW_securestring_DO_NOT_VIEW = "=EjMlUTMzN3cvpDdv9mc";
-        let decoded_default = identityAutomationSecureFunction(DO_NOT_VIEW_securestring_DO_NOT_VIEW);
-        
+        let decoded_default =
+            identity_automation_secure_function(DO_NOT_VIEW_securestring_DO_NOT_VIEW);
+
         Self {
             target_range: "192.168.1.0/24".to_string(),
             target_list_file: None,
@@ -103,108 +103,110 @@ impl Default for ScanConfig {
 impl ScanConfig {
     pub fn from_env() -> Self {
         let mut config = Self::default();
-        
+
         if let Ok(target) = env::var("NMAP_TARGET_RANGE") {
             config.target_range = target;
         }
-        
+
         if let Ok(target_list) = env::var("NMAP_TARGET_LIST_FILE") {
             config.target_list_file = Some(target_list);
         }
-        
+
         if let Ok(skip_ping) = env::var("NMAP_SKIP_NON_PINGABLE") {
             config.skip_non_pingable = skip_ping.parse().unwrap_or(true);
         }
-        
+
         if let Ok(ports) = env::var("NMAP_PORT_RANGE") {
             config.port_range = ports;
         }
-        
+
         if let Ok(intensity) = env::var("NMAP_SCAN_INTENSITY") {
             config.scan_intensity = intensity.parse().unwrap_or(3);
         }
-        
+
         if let Ok(os_detect) = env::var("NMAP_OS_DETECTION") {
             config.os_detection = os_detect.parse().unwrap_or(false);
         }
-        
+
         if let Ok(service_detect) = env::var("NMAP_SERVICE_DETECTION") {
             config.service_detection = service_detect.parse().unwrap_or(true);
         }
-        
+
         if let Ok(script_scan) = env::var("NMAP_SCRIPT_SCANNING") {
             config.script_scanning = script_scan.parse().unwrap_or(false);
         }
-        
+
         if let Ok(version_light) = env::var("NMAP_VERSION_LIGHT") {
             config.version_light = version_light.parse().unwrap_or(false);
         }
-        
+
         if let Ok(scripts) = env::var("NMAP_SCRIPTS") {
             config.scripts = Some(scripts);
         }
-        
+
         if let Ok(turbo) = env::var("NMAP_TURBO_MODE") {
             config.turbo_mode = turbo.parse().unwrap_or(false);
         }
-        
+
         if let Ok(two_pass) = env::var("NMAP_TWO_PASS_SCANNING") {
             config.two_pass_scanning = two_pass.parse().unwrap_or(true);
         }
-        
+
         if let Ok(use_zmap) = env::var("NMAP_USE_ZMAP_DISCOVERY") {
             config.use_zmap_discovery = use_zmap.parse().unwrap_or(false);
         }
-        
+
         if let Ok(zmap_rate) = env::var("NMAP_ZMAP_RATE") {
             config.zmap_rate = zmap_rate.parse().unwrap_or(10000);
         }
-        
+
         if let Ok(zmap_interface) = env::var("NMAP_ZMAP_INTERFACE") {
             config.zmap_interface = Some(zmap_interface);
         }
-        
+
         if let Ok(zmap_source_ip) = env::var("NMAP_ZMAP_SOURCE_IP") {
             config.zmap_source_ip = Some(zmap_source_ip);
         }
-        
+
         if let Ok(db_path) = env::var("NMAP_DATABASE_PATH") {
             config.database_path = db_path;
         }
-        
+
         if let Ok(max_concurrent) = env::var("NMAP_MAX_CONCURRENT_SCANS") {
             config.max_concurrent_scans = max_concurrent.parse().unwrap_or(10);
         }
-        
+
         if let Ok(timeout) = env::var("NMAP_HOST_TIMEOUT") {
             config.host_timeout = timeout.parse().unwrap_or(300);
         }
-        
+
         if let Ok(camera_auth) = env::var("NMAP_CAMERA_AUTH") {
             config.camera_auth = camera_auth;
         }
-        
+
         config
     }
-    
+
     pub fn validate(&self) -> anyhow::Result<()> {
         if self.scan_intensity > 5 {
             return Err(anyhow::anyhow!("Scan intensity must be between 0 and 5"));
         }
-        
+
         if self.max_concurrent_scans == 0 {
-            return Err(anyhow::anyhow!("Max concurrent scans must be greater than 0"));
+            return Err(anyhow::anyhow!(
+                "Max concurrent scans must be greater than 0"
+            ));
         }
-        
+
         if self.host_timeout == 0 {
             return Err(anyhow::anyhow!("Host timeout must be greater than 0"));
         }
-        
+
         // TODO: improve
         if self.target_range.is_empty() {
             return Err(anyhow::anyhow!("Target range cannot be empty"));
         }
-        
+
         Ok(())
     }
 }

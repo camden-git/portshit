@@ -16,10 +16,8 @@ impl NetworkRange {
             return Err(anyhow::anyhow!("Invalid CIDR format: {}", cidr));
         }
 
-        let ip = IpAddr::from_str(parts[0])
-            .context("Invalid IP address")?;
-        let prefix_len: u8 = parts[1].parse()
-            .context("Invalid prefix length")?;
+        let ip = IpAddr::from_str(parts[0]).context("Invalid IP address")?;
+        let prefix_len: u8 = parts[1].parse().context("Invalid prefix length")?;
 
         let (start_ip, end_ip) = Self::calculate_range(ip, prefix_len)?;
 
@@ -41,10 +39,8 @@ impl NetworkRange {
                 return Err(anyhow::anyhow!("Invalid range format: {}", range));
             }
 
-            let start_ip = IpAddr::from_str(parts[0].trim())
-                .context("Invalid start IP address")?;
-            let end_ip = IpAddr::from_str(parts[1].trim())
-                .context("Invalid end IP address")?;
+            let start_ip = IpAddr::from_str(parts[0].trim()).context("Invalid start IP address")?;
+            let end_ip = IpAddr::from_str(parts[1].trim()).context("Invalid end IP address")?;
 
             // calculate CIDR from range
             let cidr = Self::calculate_cidr_from_range(start_ip, end_ip)?;
@@ -56,8 +52,7 @@ impl NetworkRange {
             })
         } else {
             // single IP
-            let ip = IpAddr::from_str(range)
-                .context("Invalid IP address")?;
+            let ip = IpAddr::from_str(range).context("Invalid IP address")?;
             Ok(Self {
                 start_ip: ip,
                 end_ip: ip,
@@ -77,15 +72,13 @@ impl NetworkRange {
                 };
                 let network = ip_u32 & mask;
                 let broadcast = network | (!mask);
-                
+
                 let start_ip = IpAddr::V4(std::net::Ipv4Addr::from(network));
                 let end_ip = IpAddr::V4(std::net::Ipv4Addr::from(broadcast));
-                
+
                 Ok((start_ip, end_ip))
             }
-            IpAddr::V6(_) => {
-                Err(anyhow::anyhow!("IPv6 not supported yet"))
-            }
+            IpAddr::V6(_) => Err(anyhow::anyhow!("IPv6 not supported yet")),
         }
     }
 
@@ -94,22 +87,27 @@ impl NetworkRange {
             (IpAddr::V4(start), IpAddr::V4(end)) => {
                 let start_u32 = u32::from(start);
                 let end_u32 = u32::from(end);
-                let _range = end_u32 - start_u32 + 1;
-                
+
                 // find the smallest CIDR that contains this range
                 for cidr in 0..=32 {
-                    let mask = if cidr == 0 { 0 } else { u32::MAX << (32 - cidr) };
+                    let mask = if cidr == 0 {
+                        0
+                    } else {
+                        u32::MAX << (32 - cidr)
+                    };
                     let network = start_u32 & mask;
                     let broadcast = network | (!mask);
-                    
+
                     if start_u32 >= network && end_u32 <= broadcast {
                         return Ok(cidr);
                     }
                 }
-                
+
                 Ok(32) // default to /32 if we can't determine
             }
-            _ => Err(anyhow::anyhow!("IPv6 not supported yet, please see https://ipv6excuses.com/")),
+            _ => Err(anyhow::anyhow!(
+                "IPv6 not supported yet, please see https://ipv6excuses.com/"
+            )),
         }
     }
 
@@ -120,7 +118,7 @@ impl NetworkRange {
         }
 
         let mut chunks = Vec::new();
-        
+
         match self.start_ip {
             IpAddr::V4(start_ipv4) => {
                 let start_u32 = u32::from(start_ipv4);
@@ -131,22 +129,22 @@ impl NetworkRange {
 
                 // calculate the chunk size in terms of IP addresses
                 let chunk_size_u32 = 1u32 << (32 - chunk_size);
-                
+
                 // start from the network boundary
                 let network_mask = u32::MAX << (32 - self.cidr);
                 let network_start = start_u32 & network_mask;
-                
+
                 let mut current = network_start;
                 while current <= end_u32 {
                     let chunk_start = current;
                     let chunk_end = (current + chunk_size_u32 - 1).min(end_u32);
-                    
+
                     chunks.push(NetworkRange {
                         start_ip: IpAddr::V4(std::net::Ipv4Addr::from(chunk_start)),
                         end_ip: IpAddr::V4(std::net::Ipv4Addr::from(chunk_end)),
                         cidr: chunk_size,
                     });
-                    
+
                     // move to the next chunk
                     current += chunk_size_u32;
                 }
@@ -199,11 +197,11 @@ mod tests {
         let range = NetworkRange::from_cidr("192.168.0.0/16").unwrap();
         let chunks = range.split_into_chunks(24).unwrap();
         assert_eq!(chunks.len(), 256); // 256 /24 networks in a /16
-        
+
         assert_eq!(chunks[0].start_ip.to_string(), "192.168.0.0");
         assert_eq!(chunks[0].end_ip.to_string(), "192.168.0.255");
         assert_eq!(chunks[0].cidr, 24);
-        
+
         assert_eq!(chunks[255].start_ip.to_string(), "192.168.255.0");
         assert_eq!(chunks[255].end_ip.to_string(), "192.168.255.255");
         assert_eq!(chunks[255].cidr, 24);

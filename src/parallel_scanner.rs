@@ -43,19 +43,23 @@ impl ParallelScanManager {
     pub async fn scan_large_network(&self, db: &Database) -> Result<Uuid> {
         let session_id = Uuid::new_v4();
         let start_time = Utc::now();
-        
+
         info!("Starting parallel scan: {}", self.config.target_range);
-        
+
         // parse the target range
         let network_range = NetworkRange::from_range(&self.config.target_range)?;
         let total_hosts = network_range.get_host_count();
-        
-        info!("Network range: {} ({} hosts)", network_range.to_cidr_string(), total_hosts);
-        
+
+        info!(
+            "Network range: {} ({} hosts)",
+            network_range.to_cidr_string(),
+            total_hosts
+        );
+
         // split into manageable chunks
         let chunks = network_range.split_into_chunks(self.chunk_size)?;
         info!("Split into {} chunks of /{}", chunks.len(), self.chunk_size);
-        
+
         if chunks.is_empty() {
             return Err(anyhow::anyhow!("No chunks to scan"));
         }
@@ -71,7 +75,7 @@ impl ParallelScanManager {
             hosts_down: 0,
             config_json: serde_json::to_string(&self.config)?,
         };
-        
+
         db.create_scan_session(&session).await?;
 
         // create channels for communication
@@ -83,14 +87,17 @@ impl ParallelScanManager {
         let db_arc = Arc::new(db.clone());
 
         let total_chunks = chunks.len();
-        
+
         // spawn progress reporter
         let progress_handle = tokio::spawn(async move {
             let mut completed = 0;
-            
+
             while let Some(message) = progress_rx.recv().await {
                 completed += 1;
-                info!("Progress: {}/{} chunks completed - {}", completed, total_chunks, message);
+                info!(
+                    "Progress: {}/{} chunks completed - {}",
+                    completed, total_chunks, message
+                );
             }
         });
 
@@ -108,42 +115,55 @@ impl ParallelScanManager {
             let handle = tokio::spawn(async move {
                 let _permit = semaphore_clone.acquire().await.unwrap();
                 let chunk_start = Utc::now();
-                
+
                 debug!("Starting scan of chunk {}: {}", index + 1, chunk_range);
-                
-                let result = Self::scan_chunk(&chunk_config, db_task_clone.as_ref(), session_id_clone, &chunk_range).await;
-                
+
+                let result = Self::scan_chunk(
+                    &chunk_config,
+                    db_task_clone.as_ref(),
+                    session_id_clone,
+                    &chunk_range,
+                )
+                .await;
+
                 let duration = Utc::now().signed_duration_since(chunk_start).num_seconds() as u64;
-                
+
                 match result {
                     Ok(hosts_found) => {
-                        let message = format!("Chunk {} completed: {} hosts found", index + 1, hosts_found);
+                        let message =
+                            format!("Chunk {} completed: {} hosts found", index + 1, hosts_found);
                         progress_tx_clone.send(message).await.ok();
-                        
-                        result_tx_clone.send(ChunkScanResult {
-                            chunk_range: chunk_range.clone(),
-                            hosts_found,
-                            scan_duration: duration,
-                            success: true,
-                            error: None,
-                        }).await.ok();
+
+                        result_tx_clone
+                            .send(ChunkScanResult {
+                                chunk_range: chunk_range.clone(),
+                                hosts_found,
+                                scan_duration: duration,
+                                success: true,
+                                error: None,
+                            })
+                            .await
+                            .ok();
                     }
                     Err(e) => {
                         let error_msg = format!("Chunk {} failed: {}", index + 1, e);
                         warn!("{}", error_msg);
                         progress_tx_clone.send(error_msg.clone()).await.ok();
-                        
-                        result_tx_clone.send(ChunkScanResult {
-                            chunk_range: chunk_range.clone(),
-                            hosts_found: 0,
-                            scan_duration: duration,
-                            success: false,
-                            error: Some(e.to_string()),
-                        }).await.ok();
+
+                        result_tx_clone
+                            .send(ChunkScanResult {
+                                chunk_range: chunk_range.clone(),
+                                hosts_found: 0,
+                                scan_duration: duration,
+                                success: false,
+                                error: Some(e.to_string()),
+                            })
+                            .await
+                            .ok();
                     }
                 }
             });
-            
+
             handles.push(handle);
         }
 
@@ -183,7 +203,10 @@ impl ParallelScanManager {
 
         info!(
             "Parallel scan completed: {} chunks, {} successful, {} failed, {} total hosts found",
-            chunks.len(), successful_chunks, failed_chunks, total_hosts_found
+            chunks.len(),
+            successful_chunks,
+            failed_chunks,
+            total_hosts_found
         );
 
         Ok(session_id)
@@ -206,14 +229,14 @@ impl ParallelScanManager {
             // use hybrid zmap+nmap scanning
             let zmap_config = ZmapConfig::from_scan_config(chunk_config);
             let zmap_scanner = ZmapScanner::new(zmap_config);
-            
+
             match zmap_scanner.scan_network().await {
                 Ok(zmap_results) => {
                     if zmap_results.is_empty() {
                         debug!("No hosts found in chunk {}", chunk_range);
                         return Ok(0);
                     }
-                    
+
                     let nmap_scanner = NmapScanner::new(chunk_config.clone());
                     // for zmap results, we need to create a temporary session and then merge results
                     match nmap_scanner.scan_network_with_session(db, session_id).await {
@@ -225,7 +248,10 @@ impl ParallelScanManager {
                     }
                 }
                 Err(e) => {
-                    warn!("Zmap scan failed for chunk {}, falling back to nmap: {}", chunk_range, e);
+                    warn!(
+                        "Zmap scan failed for chunk {}, falling back to nmap: {}",
+                        chunk_range, e
+                    );
                     // fall back to traditional nmap scanning
                     let nmap_scanner = NmapScanner::new(chunk_config.clone());
                     match nmap_scanner.scan_network_with_session(db, session_id).await {

@@ -54,7 +54,8 @@ impl PipelineScanner {
     }
 
     pub async fn scan_large_network(&self, db: &Database) -> Result<Uuid> {
-        let (session_id, is_resume) = if let Some(resume_session_str) = &self.config.resume_session {
+        let (session_id, is_resume) = if let Some(resume_session_str) = &self.config.resume_session
+        {
             let resume_session_id = Uuid::parse_str(resume_session_str)
                 .map_err(|e| anyhow::anyhow!("Invalid resume session ID: {}", e))?;
             info!("Resuming scan session: {}", resume_session_id);
@@ -62,26 +63,36 @@ impl PipelineScanner {
         } else {
             (Uuid::new_v4(), false)
         };
-        
+
         let start_time = Utc::now();
-        
+
         if is_resume {
-            info!("Resuming 3-stage pipeline scan of large network: {}", self.config.target_range);
+            info!(
+                "Resuming 3-stage pipeline scan of large network: {}",
+                self.config.target_range
+            );
         } else {
-            info!("Starting 3-stage pipeline scan of large network: {}", self.config.target_range);
+            info!(
+                "Starting 3-stage pipeline scan of large network: {}",
+                self.config.target_range
+            );
         }
-        
+
         // parse the target range
         let network_range = NetworkRange::from_range(&self.config.target_range)?;
         let total_hosts = network_range.get_host_count();
-        
-        info!("Network range: {} ({} hosts)", network_range.to_cidr_string(), total_hosts);
-        
+
+        info!(
+            "Network range: {} ({} hosts)",
+            network_range.to_cidr_string(),
+            total_hosts
+        );
+
         // split into manageable chunks
         let chunks = network_range.split_into_chunks(self.chunk_size)?;
         let total_chunks = chunks.len();
         info!("Split into {} chunks of /{}", total_chunks, self.chunk_size);
-        
+
         if chunks.is_empty() {
             return Err(anyhow::anyhow!("No chunks to scan"));
         }
@@ -97,30 +108,43 @@ impl PipelineScanner {
             hosts_down: 0,
             config_json: serde_json::to_string(&self.config)?,
         };
-        
+
         if !is_resume {
             db.create_scan_session(&session).await?;
         }
 
         // filter out completed chunks if resuming
         let chunks_to_process = if is_resume {
-            let completed_discovery = db.get_completed_chunks_for_stage(&session_id, "discovery").await?;
-            let completed_service = db.get_completed_chunks_for_stage(&session_id, "service").await?;
-            let completed_camera = db.get_completed_chunks_for_stage(&session_id, "camera").await?;
-            
+            let completed_discovery = db
+                .get_completed_chunks_for_stage(&session_id, "discovery")
+                .await?;
+            let completed_service = db
+                .get_completed_chunks_for_stage(&session_id, "service")
+                .await?;
+            let completed_camera = db
+                .get_completed_chunks_for_stage(&session_id, "camera")
+                .await?;
+
             info!("Resume status - Discovery: {} completed, Service: {} completed, Camera: {} completed", 
                   completed_discovery.len(), completed_service.len(), completed_camera.len());
-            
+
             // for resume, we need to process chunks that haven't completed all stages
-            chunks.into_iter().filter(|chunk| {
-                let chunk_str = chunk.to_cidr_string();
-                !completed_camera.contains(&chunk_str) // only skip if camera stage is complete
-            }).collect()
+            chunks
+                .into_iter()
+                .filter(|chunk| {
+                    let chunk_str = chunk.to_cidr_string();
+                    !completed_camera.contains(&chunk_str) // only skip if camera stage is complete
+                })
+                .collect()
         } else {
             chunks
         };
 
-        info!("Processing {} chunks ({} total)", chunks_to_process.len(), total_chunks);
+        info!(
+            "Processing {} chunks ({} total)",
+            chunks_to_process.len(),
+            total_chunks
+        );
 
         // create channels for inter-stage communication
         let (discovery_tx, discovery_rx) = mpsc::channel::<NetworkRange>(chunks_to_process.len());
@@ -135,12 +159,12 @@ impl PipelineScanner {
         let db_arc = Arc::new(db.clone());
 
         let chunks_to_process_count = chunks_to_process.len();
-        
+
         // spawn progress reporter
         let progress_handle = tokio::spawn(async move {
             let mut completed = 0;
             let total = chunks_to_process_count * 3; // 3 stages per chunk
-            
+
             while let Some(message) = progress_rx.recv().await {
                 completed += 1;
                 info!("Pipeline Progress: {}/{} - {}", completed, total, message);
@@ -168,30 +192,40 @@ impl PipelineScanner {
                             None => break, // Channel closed
                         }
                     };
-                    
+
                     let _permit = discovery_semaphore_clone.acquire().await.unwrap();
-                    
-                    debug!("Discovery thread {} processing chunk: {}", i, chunk.to_cidr_string());
-                    
-                    match Self::discovery_stage(&config_clone, &db_clone, session_id_clone, &chunk).await {
+
+                    debug!(
+                        "Discovery thread {} processing chunk: {}",
+                        i,
+                        chunk.to_cidr_string()
+                    );
+
+                    match Self::discovery_stage(&config_clone, &db_clone, session_id_clone, &chunk)
+                        .await
+                    {
                         Ok(hosts) => {
-                            let message = format!("[DISCOVERY] {}: {} hosts found", 
-                                chunk.to_cidr_string(), hosts.len());
+                            let message = format!(
+                                "[DISCOVERY] {}: {} hosts found",
+                                chunk.to_cidr_string(),
+                                hosts.len()
+                            );
                             progress_tx_clone.send(message).await.ok();
-                            
+
                             if !hosts.is_empty() {
                                 service_tx_clone.send(hosts).await.ok();
                             }
                         }
                         Err(e) => {
-                            let message = format!("[DISCOVERY] {}: FAILED - {}", chunk.to_cidr_string(), e);
+                            let message =
+                                format!("[DISCOVERY] {}: FAILED - {}", chunk.to_cidr_string(), e);
                             warn!("{}", message);
                             progress_tx_clone.send(message).await.ok();
                         }
                     }
                 }
             });
-            
+
             discovery_handles.push(handle);
         }
 
@@ -216,22 +250,36 @@ impl PipelineScanner {
                             None => break, // Channel closed
                         }
                     };
-                    
+
                     let _permit = service_semaphore_clone.acquire().await.unwrap();
-                    
+
                     debug!("Service thread {} processing {} hosts", i, hosts.len());
-                    
-                    match Self::service_stage(&config_clone, &db_clone, session_id_clone, "unknown", &hosts).await {
+
+                    match Self::service_stage(
+                        &config_clone,
+                        &db_clone,
+                        session_id_clone,
+                        "unknown",
+                        &hosts,
+                    )
+                    .await
+                    {
                         Ok(updated_hosts) => {
-                            let message = format!("[SERVICE] {} hosts processed", updated_hosts.len());
+                            let message =
+                                format!("[SERVICE] {} hosts processed", updated_hosts.len());
                             progress_tx_clone.send(message).await.ok();
-                            
+
                             // stream hosts to camera stage only if scanning port 554
                             if config_clone.port_range.contains("554") {
-                                debug!("[SERVICE] Streaming {} hosts to camera stage", updated_hosts.len());
+                                debug!(
+                                    "[SERVICE] Streaming {} hosts to camera stage",
+                                    updated_hosts.len()
+                                );
                                 camera_tx_clone.send(updated_hosts).await.ok();
                             } else {
-                                debug!("[SERVICE] Skipping camera stage - port 554 not in scan range");
+                                debug!(
+                                    "[SERVICE] Skipping camera stage - port 554 not in scan range"
+                                );
                             }
                         }
                         Err(e) => {
@@ -242,54 +290,66 @@ impl PipelineScanner {
                     }
                 }
             });
-            
+
             service_handles.push(handle);
         }
 
         // camera capture threads
         let camera_rx_arc = Arc::new(tokio::sync::Mutex::new(camera_rx));
         let mut camera_handles = Vec::new();
-        
+
         // skip camera threads entirely if not scanning port 554
         if self.config.port_range.contains("554") {
-            info!("Starting {} camera capture threads", self.pipeline_config.camera_threads);
+            info!(
+                "Starting {} camera capture threads",
+                self.pipeline_config.camera_threads
+            );
             for i in 0..self.pipeline_config.camera_threads {
-            let camera_semaphore_clone = camera_semaphore.clone();
-            let progress_tx_clone = progress_tx.clone();
-            let session_id_clone = session_id;
-            let camera_rx_clone = camera_rx_arc.clone();
-            let db_clone = db_arc.clone();
-            let config_clone = self.config.clone();
+                let camera_semaphore_clone = camera_semaphore.clone();
+                let progress_tx_clone = progress_tx.clone();
+                let session_id_clone = session_id;
+                let camera_rx_clone = camera_rx_arc.clone();
+                let db_clone = db_arc.clone();
+                let config_clone = self.config.clone();
 
-            let handle = tokio::spawn(async move {
-                loop {
-                    let hosts = {
-                        let mut rx = camera_rx_clone.lock().await;
-                        match rx.recv().await {
-                            Some(hosts) => hosts,
-                            None => break, // Channel closed
-                        }
-                    };
-                    
-                    let _permit = camera_semaphore_clone.acquire().await.unwrap();
-                    
-                    debug!("Camera thread {} processing {} hosts", i, hosts.len());
-                    
-                    match Self::camera_stage(&config_clone, &db_clone, session_id_clone, "unknown", &hosts).await {
-                        Ok(screenshots) => {
-                            let message = format!("[CAMERA] {} screenshots captured", screenshots);
-                            progress_tx_clone.send(message).await.ok();
-                        }
-                        Err(e) => {
-                            let message = format!("[CAMERA] FAILED - {}", e);
-                            warn!("{}", message);
-                            progress_tx_clone.send(message).await.ok();
+                let handle = tokio::spawn(async move {
+                    loop {
+                        let hosts = {
+                            let mut rx = camera_rx_clone.lock().await;
+                            match rx.recv().await {
+                                Some(hosts) => hosts,
+                                None => break, // Channel closed
+                            }
+                        };
+
+                        let _permit = camera_semaphore_clone.acquire().await.unwrap();
+
+                        debug!("Camera thread {} processing {} hosts", i, hosts.len());
+
+                        match Self::camera_stage(
+                            &config_clone,
+                            &db_clone,
+                            session_id_clone,
+                            "unknown",
+                            &hosts,
+                        )
+                        .await
+                        {
+                            Ok(screenshots) => {
+                                let message =
+                                    format!("[CAMERA] {} screenshots captured", screenshots);
+                                progress_tx_clone.send(message).await.ok();
+                            }
+                            Err(e) => {
+                                let message = format!("[CAMERA] FAILED - {}", e);
+                                warn!("{}", message);
+                                progress_tx_clone.send(message).await.ok();
+                            }
                         }
                     }
-                }
-            });
-            
-            camera_handles.push(handle);
+                });
+
+                camera_handles.push(handle);
             }
         } else {
             info!("Skipping camera capture threads - port 554 not in scan range");
@@ -316,7 +376,11 @@ impl PipelineScanner {
                         results.push(Err(e));
                     }
                 }
-                if results.is_empty() { Ok(()) } else { results.into_iter().next().unwrap() }
+                if results.is_empty() {
+                    Ok(())
+                } else {
+                    results.into_iter().next().unwrap()
+                }
             },
             async {
                 let mut results = Vec::new();
@@ -325,7 +389,11 @@ impl PipelineScanner {
                         results.push(Err(e));
                     }
                 }
-                if results.is_empty() { Ok(()) } else { results.into_iter().next().unwrap() }
+                if results.is_empty() {
+                    Ok(())
+                } else {
+                    results.into_iter().next().unwrap()
+                }
             },
             async {
                 let mut results = Vec::new();
@@ -334,7 +402,11 @@ impl PipelineScanner {
                         results.push(Err(e));
                     }
                 }
-                if results.is_empty() { Ok(()) } else { results.into_iter().next().unwrap() }
+                if results.is_empty() {
+                    Ok(())
+                } else {
+                    results.into_iter().next().unwrap()
+                }
             }
         );
 
@@ -369,24 +441,29 @@ impl PipelineScanner {
         chunk: &NetworkRange,
     ) -> Result<Vec<Host>> {
         let progress_id = if !config.turbo_mode {
-            db.create_scan_progress(&session_id, &chunk.to_cidr_string(), "discovery").await?
+            db.create_scan_progress(&session_id, &chunk.to_cidr_string(), "discovery")
+                .await?
         } else {
             Uuid::new_v4() // dummy ID
         };
-        
+
         let mut chunk_config = config.clone();
         chunk_config.target_range = chunk.to_cidr_string();
         chunk_config.max_concurrent_scans = 1;
 
         let nmap_scanner = NmapScanner::new(chunk_config);
-        let hosts_found = nmap_scanner.scan_network_with_session(db, session_id).await?;
-        
+        let hosts_found = nmap_scanner
+            .scan_network_with_session(db, session_id)
+            .await?;
+
         // get the hosts that were discovered and restrict to this chunk's IP range
         let all_hosts = db.get_hosts_by_session(&session_id).await?;
         let hosts: Vec<Host> = all_hosts
             .into_iter()
             .filter(|h| {
-                if let (std::net::IpAddr::V4(start), std::net::IpAddr::V4(end)) = (chunk.start_ip, chunk.end_ip) {
+                if let (std::net::IpAddr::V4(start), std::net::IpAddr::V4(end)) =
+                    (chunk.start_ip, chunk.end_ip)
+                {
                     if let Ok(ipv4) = h.ip_address.parse::<std::net::Ipv4Addr>() {
                         let ip = u32::from(ipv4);
                         let start_u32 = u32::from(start);
@@ -397,12 +474,13 @@ impl PipelineScanner {
                 false
             })
             .collect();
-        
+
         // update progress as completed
         if !config.turbo_mode {
-            db.update_scan_progress_status(&progress_id, "completed", None).await?;
+            db.update_scan_progress_status(&progress_id, "completed", None)
+                .await?;
         }
-        
+
         Ok(hosts)
     }
 
@@ -414,44 +492,51 @@ impl PipelineScanner {
         hosts: &[Host],
     ) -> Result<Vec<Host>> {
         // create progress record
-        let progress_id = db.create_scan_progress(&session_id, chunk_range, "service").await?;
-        
+        let progress_id = db
+            .create_scan_progress(&session_id, chunk_range, "service")
+            .await?;
+
         if hosts.is_empty() {
-            db.update_scan_progress_status(&progress_id, "completed", None).await?;
+            db.update_scan_progress_status(&progress_id, "completed", None)
+                .await?;
             return Ok(hosts.to_vec());
         }
-        
+
         // perform service detection on the hosts using nmap
         let mut service_config = config.clone();
-        
+
         // create a target list from the discovered hosts
         let host_ips: Vec<String> = hosts.iter().map(|h| h.ip_address.clone()).collect();
         let target_list = host_ips.join(",");
         service_config.target_range = target_list;
-        
+
         // disable host discovery since we already know these hosts are up
         service_config.skip_non_pingable = true;
-        
+
         // create a temporary nmap scanner for service detection
         let nmap_scanner = NmapScanner::new(service_config);
-        
+
         // run service detection scan
         match nmap_scanner.scan_network_with_session(db, session_id).await {
             Ok(_) => {
-                debug!("[SERVICE] Successfully completed service detection for {} hosts", hosts.len());
+                debug!(
+                    "[SERVICE] Successfully completed service detection for {} hosts",
+                    hosts.len()
+                );
             }
             Err(e) => {
                 warn!("[SERVICE] Service detection failed: {}", e);
                 // continue anyway
             }
         }
-        
+
         // pass through the same hosts for downstream processing (service info is stored in DB)
         let updated_hosts: Vec<Host> = hosts.to_vec();
-        
+
         // update progress as completed
-        db.update_scan_progress_status(&progress_id, "completed", None).await?;
-        
+        db.update_scan_progress_status(&progress_id, "completed", None)
+            .await?;
+
         Ok(updated_hosts)
     }
 
@@ -463,13 +548,15 @@ impl PipelineScanner {
         hosts: &[Host],
     ) -> Result<usize> {
         // create progress record
-        let progress_id = db.create_scan_progress(&session_id, chunk_range, "camera").await?;
+        let progress_id = db
+            .create_scan_progress(&session_id, chunk_range, "camera")
+            .await?;
         use crate::camera::CameraDetector;
-        
+
         // create camera detector
         let screenshot_dir = format!("screenshots/{}", session_id);
         let camera_detector = CameraDetector::new(screenshot_dir, config.clone());
-        
+
         // if we're not scanning port 554, skip camera processing entirely
         if !config.port_range.contains("554") {
             debug!("[CAMERA] Port 554 not in scan range, skipping camera processing");
@@ -489,20 +576,21 @@ impl PipelineScanner {
         // filter hosts that have port 554 open
         let mut rtsp_hosts = Vec::new();
         for host in hosts {
-            let has_rtsp = rtsp_ports.iter().any(|port| 
+            let has_rtsp = rtsp_ports.iter().any(|port| {
                 port.host_id == host.id && (port.state == "open" || port.state == "filtered")
-            );
+            });
             if has_rtsp {
                 debug!("[CAMERA] Host {} has RTSP port 554", host.ip_address);
                 rtsp_hosts.push(host.ip_address.clone());
             }
         }
-        
+
         if rtsp_hosts.is_empty() {
             return Ok(0);
         }
-        
-        // capture screenshots from each RTSP host, skipping already captured hosts
+
+        // Discover and capture all cameras from each RTSP host
+        // This will discover individual cameras (camera=1, camera=2, etc.) and grid views
         let mut screenshots_captured = 0;
         use std::collections::HashSet;
         let mut seen: HashSet<String> = HashSet::new();
@@ -510,55 +598,34 @@ impl PipelineScanner {
             if !seen.insert(host_ip.clone()) {
                 continue;
             }
-            if db.has_camera_screenshot_for_host(&session_id, &host_ip).await.unwrap_or(false) {
-                debug!("[CAMERA] Skipping {} - screenshot already exists for session", host_ip);
-                continue;
-            }
-            match camera_detector.capture_camera_screenshot(&host_ip).await {
-                Ok(screenshot_path) => {
-                    screenshots_captured += 1;
-                    debug!("Successfully captured screenshot from {}: {}", host_ip, screenshot_path);
-                    
-                    // save screenshot info to database
-                    let rtsp_url = camera_detector.get_working_rtsp_url(&host_ip)?;
-                    let screenshot = crate::database::CameraScreenshot {
-                        id: uuid::Uuid::new_v4(),
-                        scan_session_id: session_id,
-                        host_ip: host_ip.clone(),
-                        rtsp_url,
-                        screenshot_path: screenshot_path.clone(),
-                        captured_at: chrono::Utc::now(),
-                        error_message: None,
-                    };
-                    
-                    if let Err(e) = db.insert_camera_screenshot(&screenshot).await {
-                        warn!("Failed to save screenshot record to database: {}", e);
+
+            // Use the new multi-camera discovery system
+            match camera_detector
+                .discover_and_capture_cameras_for_host(db, session_id, &host_ip)
+                .await
+            {
+                Ok(count) => {
+                    screenshots_captured += count;
+                    if count > 0 {
+                debug!(
+                            "Successfully captured {} camera(s) from {}",
+                            count, host_ip
+                        );
                     }
                 }
                 Err(e) => {
-                    warn!("Failed to capture screenshot from {}: {}", host_ip, e);
-                    
-                    // log the failure to database
-                    let screenshot = crate::database::CameraScreenshot {
-                        id: uuid::Uuid::new_v4(),
-                        scan_session_id: session_id,
-                        host_ip: host_ip.clone(),
-                        rtsp_url: "N/A".to_string(), // no working URL found
-                        screenshot_path: "N/A".to_string(), // no screenshot captured
-                        captured_at: chrono::Utc::now(),
-                        error_message: Some(e.to_string()), // store the error message
-                    };
-                    
-                    if let Err(db_err) = db.insert_camera_screenshot(&screenshot).await {
-                        warn!("Failed to log camera error to database: {}", db_err);
-                    }
+                    warn!(
+                        "Failed to discover/capture cameras from {}: {}",
+                        host_ip, e
+                    );
                 }
             }
         }
-        
+
         // update progress as completed
-        db.update_scan_progress_status(&progress_id, "completed", None).await?;
-        
+        db.update_scan_progress_status(&progress_id, "completed", None)
+            .await?;
+
         Ok(screenshots_captured)
     }
 }
